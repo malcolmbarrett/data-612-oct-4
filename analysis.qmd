@@ -1,0 +1,75 @@
+---
+title: "Analysis: COVID data"
+format: html
+---
+
+```{r}
+# remotes::install_github("kjhealy/covdata@main")
+library(tidyverse)
+library(covdata)
+mortality <- as_tibble(nchs_wdc) |> 
+  filter(year <= 2020)
+```
+
+Here's the plot: https://kieranhealy.org/blog/archives/2021/02/24/excess-deaths-february-update/
+
+```{r}
+mortality |> 
+  summarise(n_juris = n_distinct(jurisdiction))
+```
+
+```{r}
+all_cause_deaths <- mortality |> 
+  filter(cause_detailed == "All Cause") |> 
+  group_by(year, jurisdiction) |> 
+  summarise(mean_deaths = mean(n), .groups = "drop")
+
+
+# are any of `mean_deaths` missing?
+all_cause_deaths |> 
+  ungroup() |> 
+  summarize(any_missing = any(is.na(mean_deaths)))
+
+expected_deaths <- all_cause_deaths |> 
+  filter(year != 2020) |> 
+  group_by(jurisdiction) |> 
+  summarise(expected_deaths = mean(mean_deaths), sd_deaths = sd(mean_deaths))
+
+all_cause_deaths <- all_cause_deaths |> 
+  left_join(expected_deaths, by = "jurisdiction") |> 
+  arrange(jurisdiction, year)
+
+all_cause_deaths <- all_cause_deaths |> 
+  group_by(year, jurisdiction) |> 
+  mutate(pct_diff_mean = (mean_deaths - expected_deaths) / expected_deaths) |> 
+  ungroup()
+
+ordering <- all_cause_deaths |> 
+  filter(year == 2020) |> 
+  arrange(pct_diff_mean) |> 
+  mutate(jurisdiction = fct_inorder(jurisdiction)) |> 
+  pull(jurisdiction) |> 
+  levels()
+
+all_cause_deaths <- all_cause_deaths |> 
+  mutate(jurisdiction = factor(jurisdiction, levels = ordering))
+```
+
+```{r}
+all_cause_2020 <- all_cause_deaths |> 
+  filter(year == 2020)
+
+all_cause_deaths |> 
+  filter(year != 2020) |> 
+  ggplot(aes(pct_diff_mean, jurisdiction)) + 
+  geom_vline(xintercept = 0) +
+  geom_point(shape = 1) + 
+  geom_point(data = all_cause_2020, shape = 24, fill = "firebrick", color = "firebrick") + 
+  theme_minimal() + 
+  scale_x_continuous(
+    breaks = seq(from = -1, to = .3, by = .1),
+    labels = scales::label_percent()
+  )
+```
+
+
